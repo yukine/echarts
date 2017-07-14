@@ -8,6 +8,8 @@ define(function(require) {
     var visualSolution = require('../../visual/visualSolution');
     var Model = require('../../model/Model');
 
+    var DEFAULT_OUT_OF_BRUSH_COLOR = ['#ddd'];
+
     var BrushModel = echarts.extendComponentModel({
 
         type: 'brush',
@@ -18,17 +20,15 @@ define(function(require) {
          * @protected
          */
         defaultOption: {
-            // inBrush: {
-            // },
-            // outOfBrush: {
-            //     color: '#ddd'
-            // },
+            // inBrush: null,
+            // outOfBrush: null,
             toolbox: null,          // Default value see preprocessor.
             brushLink: null,        // Series indices array, broadcast using dataIndex.
-                                    // or 'all', which means all series.
+                                    // or 'all', which means all series. 'none' or null means no series.
             seriesIndex: 'all',     // seriesIndex array, specify series controlled by this brush component.
-            gridIndex: null,        //
             geoIndex: null,         //
+            xAxisIndex: null,
+            yAxisIndex: null,
 
             brushType: 'rect',      // Default brushType, see BrushController.
             brushMode: 'single',    // Default brushMode, 'single' or 'multiple'
@@ -36,8 +36,7 @@ define(function(require) {
             brushStyle: {           // Default brushStyle
                 borderWidth: 1,
                 color: 'rgba(120,140,180,0.3)',
-                borderColor: 'rgba(120,140,180,0.8)',
-                width: null         // do not use bursh width in line brush, but fetch from grid.
+                borderColor: 'rgba(120,140,180,0.8)'
             },
 
             throttleType: 'fixRate',// Throttle in brushSelected event. 'fixRate' or 'debounce'.
@@ -46,7 +45,9 @@ define(function(require) {
 
             // FIXME
             // 试验效果
-            removeOnClick: true
+            removeOnClick: true,
+
+            z: 10000
         },
 
         /**
@@ -78,23 +79,16 @@ define(function(require) {
          */
         coordInfoList: [],
 
-        init: function (option) {
-            var newOption = zrUtil.clone(option);
-            BrushModel.superApply(this, 'init', arguments);
-            visualSolution.replaceVisualOption(this.option, newOption, ['inBrush', 'outOfBrush']);
+        optionUpdated: function (newOption, isInit) {
+            var thisOption = this.option;
 
-            this.option.outOfBrush = this.option.outOfBrush || {
-                color: '#ddd'
-            };
-            this.option.inBrush = this.option.inBrush || {};
-        },
-
-        mergeOption: function (newOption) {
-            // FIXME init will pass a null newOption
-            visualSolution.replaceVisualOption(
-                this.option, newOption, ['inBrush', 'outOfBrush']
+            !isInit && visualSolution.replaceVisualOption(
+                thisOption, newOption, ['inBrush', 'outOfBrush']
             );
-            BrushModel.superApply(this, 'mergeOption', arguments);
+
+            thisOption.inBrush = thisOption.inBrush || {};
+            // Always give default visual, consider setOption at the second time.
+            thisOption.outOfBrush = thisOption.outOfBrush || {color: DEFAULT_OUT_OF_BRUSH_COLOR};
         },
 
         /**
@@ -118,7 +112,7 @@ define(function(require) {
             }
 
             this.areas = zrUtil.map(areas, function (area) {
-                return this._mergeBrushOption(area);
+                return generateBrushOption(this.option, area);
             }, this);
         },
 
@@ -127,29 +121,26 @@ define(function(require) {
          * @param {Object} brushOption
          */
         setBrushOption: function (brushOption) {
-            this.brushOption = this._mergeBrushOption(brushOption);
+            this.brushOption = generateBrushOption(this.option, brushOption);
             this.brushType = this.brushOption.brushType;
-        },
-
-        /**
-         * @private
-         */
-        _mergeBrushOption: function (brushOption) {
-            var option = this.option;
-            return zrUtil.merge(
-                {
-                    brushType: option.brushType,
-                    brushMode: option.brushMode,
-                    transformable: option.transformable,
-                    brushStyle: new Model(option.brushStyle).getItemStyle(),
-                    removeOnClick: option.removeOnClick
-                },
-                brushOption,
-                true
-            );
         }
 
     });
+
+    function generateBrushOption(option, brushOption) {
+        return zrUtil.merge(
+            {
+                brushType: option.brushType,
+                brushMode: option.brushMode,
+                transformable: option.transformable,
+                brushStyle: new Model(option.brushStyle).getItemStyle(),
+                removeOnClick: option.removeOnClick,
+                z: option.z
+            },
+            brushOption,
+            true
+        );
+    }
 
     return BrushModel;
 

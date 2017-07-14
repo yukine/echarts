@@ -19,6 +19,8 @@ define(function(require) {
     var linearMap = numberUtil.linearMap;
     var noop = zrUtil.noop;
 
+    var DEFAULT_COLOR = ['#f6efa6', '#d88273', '#bf444c'];
+
     var VisualMapModel = echarts.extendComponentModel({
 
         type: 'visualMap',
@@ -95,7 +97,7 @@ define(function(require) {
                                        // 接受数组分别设定上右下左边距，同css
             textGap: 10,               //
             precision: 0,              // 小数精度，默认为0，无小数点
-            color: ['#bf444c', '#d88273', '#f6efa6'], //颜色（deprecated，兼容ec2，顺序同pieces，不同于inRange/outOfRange）
+            color: null,               //颜色（deprecated，兼容ec2，顺序同pieces，不同于inRange/outOfRange）
 
             formatter: null,
             text: null,                // 文本，如['高', '低']，兼容ec2，text[0]对应高值，text[1]对应低值
@@ -154,7 +156,7 @@ define(function(require) {
             }
 
             !isInit && visualSolution.replaceVisualOption(
-                this.option, newOption, this.replacableOptionKeys
+                thisOption, newOption, this.replacableOptionKeys
             );
 
             this.textStyleModel = this.getModel('textStyle');
@@ -337,7 +339,7 @@ define(function(require) {
             completeSingle.call(this, target);
             completeSingle.call(this, controller);
             completeInactive.call(this, target, 'inRange', 'outOfRange');
-            completeInactive.call(this, target, 'outOfRange', 'inRange');
+            // completeInactive.call(this, target, 'outOfRange', 'inRange');
             completeController.call(this, controller);
 
             function completeSingle(base) {
@@ -352,6 +354,14 @@ define(function(require) {
                 ) {
                     base.inRange = {color: thisOption.color.slice().reverse()};
                 }
+
+                // Compatible with previous logic, always give a defautl color, otherwise
+                // simple config with no inRange and outOfRange will not work.
+                // Originally we use visualMap.color as the default color, but setOption at
+                // the second time the default color will be erased. So we change to use
+                // constant DEFAULT_COLOR.
+                // If user do not want the defualt color, set inRange: {color: null}.
+                base.inRange = base.inRange || {color: DEFAULT_COLOR};
 
                 // If using shortcut like: {inRange: 'symbol'}, complete default value.
                 each(this.stateList, function (state) {
@@ -486,7 +496,24 @@ define(function(require) {
          * @param {number} dataIndex
          * @return {string} state See this.stateList
          */
-        getValueState: noop
+        getValueState: noop,
+
+        /**
+         * FIXME
+         * Do not publish to thirt-part-dev temporarily
+         * util the interface is stable. (Should it return
+         * a function but not visual meta?)
+         *
+         * @pubilc
+         * @abstract
+         * @param {Function} getColorVisual
+         *        params: value, valueState
+         *        return: color
+         * @return {Object} visualMeta
+         *        should includes {stops, outerColors}
+         *        outerColor means [colorBeyondMinValue, colorBeyondMaxValue]
+         */
+        getVisualMeta: noop
 
     });
 

@@ -38,11 +38,13 @@ define(function (require) {
             var visualMetaList = [];
 
             ecModel.eachComponent('visualMap', function (visualMapModel) {
-                var visualMeta = {};
-                visualMetaList.push(visualMeta);
-
-                var stops = visualMeta.stops = visualMapModel.getStops(seriesModel, getColorVisual);
-                visualMeta.dimension = visualMapModel.getDataDimension(data);
+                if (visualMapModel.isTargetSeries(seriesModel)) {
+                    var visualMeta = visualMapModel.getVisualMeta(
+                        zrUtil.bind(getColorVisual, null, seriesModel, visualMapModel)
+                    ) || {stops: [], outerColors: []};
+                    visualMeta.dimension = visualMapModel.getDataDimension(data);
+                    visualMetaList.push(visualMeta);
+                }
             });
 
             // console.log(JSON.stringify(visualMetaList.map(a => a.stops)));
@@ -52,15 +54,18 @@ define(function (require) {
 
     // FIXME
     // performance and export for heatmap?
-    function getColorVisual(visualMapModel, value, valueState) {
+    // value can be Infinity or -Infinity
+    function getColorVisual(seriesModel, visualMapModel, value, valueState) {
         var mappings = visualMapModel.targetVisuals[valueState];
         var visualTypes = VisualMapping.prepareVisualTypes(mappings);
-        var resultVisual = {};
+        var resultVisual = {
+            color: seriesModel.getData().getVisual('color') // default color.
+        };
 
         for (var i = 0, len = visualTypes.length; i < len; i++) {
             var type = visualTypes[i];
             var mapping = mappings[
-                type === 'colorAlpha' ? '__alphaForOpacity' : type
+                type === 'opacity' ? '__alphaForOpacity' : type
             ];
             mapping && mapping.applyVisual(value, getVisual, setVisual);
         }

@@ -63,7 +63,7 @@ define(function (require) {
                     ? 'right' : 'left';
             }
 
-            var legendDrawedMap = {};
+            var legendDrawedMap = zrUtil.createHashMap();
 
             zrUtil.each(legendModel.getData(), function (itemModel) {
                 var name = itemModel.get('name');
@@ -78,7 +78,7 @@ define(function (require) {
 
                 var seriesModel = ecModel.getSeriesByName(name)[0];
 
-                if (legendDrawedMap[name]) {
+                if (legendDrawedMap.get(name)) {
                     // Have been drawed
                     return;
                 }
@@ -106,16 +106,16 @@ define(function (require) {
                     );
 
                     itemGroup.on('click', curry(dispatchSelectAction, name, api))
-                        .on('mouseover', curry(dispatchHighlightAction, seriesModel, '', api))
-                        .on('mouseout', curry(dispatchDownplayAction, seriesModel, '', api));
+                        .on('mouseover', curry(dispatchHighlightAction, seriesModel, null, api))
+                        .on('mouseout', curry(dispatchDownplayAction, seriesModel, null, api));
 
-                    legendDrawedMap[name] = true;
+                    legendDrawedMap.set(name, true);
                 }
                 else {
                     // Data legend of pie, funnel
                     ecModel.eachRawSeries(function (seriesModel) {
                         // In case multiple series has same data name
-                        if (legendDrawedMap[name]) {
+                        if (legendDrawedMap.get(name)) {
                             return;
                         }
                         if (seriesModel.legendDataProvider) {
@@ -141,13 +141,13 @@ define(function (require) {
                                 .on('mouseover', curry(dispatchHighlightAction, seriesModel, name, api))
                                 .on('mouseout', curry(dispatchDownplayAction, seriesModel, name, api));
 
-                            legendDrawedMap[name] = true;
+                            legendDrawedMap.set(name, true);
                         }
                     }, this);
                 }
 
                 if (__DEV__) {
-                    if (!legendDrawedMap[name]) {
+                    if (!legendDrawedMap.get(name)) {
                         console.warn(name + ' series not exists. Legend data should be same with series name or data name.');
                     }
                 }
@@ -174,6 +174,9 @@ define(function (require) {
             var textStyleModel = itemModel.getModel('textStyle');
 
             var itemIcon = itemModel.get('icon');
+
+            var tooltipModel = itemModel.getModel('tooltip');
+            var legendGlobalTooltipModel = tooltipModel.parentModel;
 
             // Use user given icon first
             legendSymbolType = itemIcon || legendSymbolType;
@@ -203,16 +206,17 @@ define(function (require) {
             var textAlign = itemAlign;
 
             var formatter = legendModel.get('formatter');
+            var content = name;
             if (typeof formatter === 'string' && formatter) {
-                name = formatter.replace('{name}', name);
+                content = formatter.replace('{name}', name != null ? name : '');
             }
             else if (typeof formatter === 'function') {
-                name = formatter(name);
+                content = formatter(name);
             }
 
             var text = new graphic.Text({
                 style: {
-                    text: name,
+                    text: content,
                     x: textX,
                     y: itemHeight / 2,
                     fill: isSelected ? textStyleModel.getTextColor() : inactiveColor,
@@ -224,14 +228,32 @@ define(function (require) {
             itemGroup.add(text);
 
             // Add a invisible rect to increase the area of mouse hover
-            itemGroup.add(new graphic.Rect({
+            var hitRect = new graphic.Rect({
                 shape: itemGroup.getBoundingRect(),
-                invisible: true
-            }));
+                invisible: true,
+                tooltip: tooltipModel.get('show') ? zrUtil.extend({
+                    content: name,
+                    // Defaul formatter
+                    formatter: legendGlobalTooltipModel.get('formatter', true) || function () {
+                        return name;
+                    },
+                    formatterParams: {
+                        componentType: 'legend',
+                        legendIndex: legendModel.componentIndex,
+                        name: name,
+                        $vars: ['name']
+                    }
+                }, tooltipModel.option) : null
+            });
+            itemGroup.add(hitRect);
 
             itemGroup.eachChild(function (child) {
-                child.silent = !selectMode;
+                child.silent = true;
             });
+
+            hitRect.silent = !selectMode;
+
+
 
             this.group.add(itemGroup);
 

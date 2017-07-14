@@ -11,6 +11,8 @@ define(function(require) {
 
         dependencies: ['parallel'],
 
+        visualColorAccessPath: 'lineStyle.normal.color',
+
         getInitialData: function (option, ecModel) {
             var parallelModel = ecModel.getComponent(
                 'parallel', this.get('parallelIndex')
@@ -96,7 +98,7 @@ define(function(require) {
 
             lineStyle: {
                 normal: {
-                    width: 2,
+                    width: 1,
                     opacity: 0.45,
                     type: 'solid'
                 }

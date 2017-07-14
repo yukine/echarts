@@ -7,16 +7,17 @@ define(function(require) {
     var env = require('zrender/core/env');
     var echarts = require('../../echarts');
     var modelUtil = require('../../util/model');
+    var helper = require('./helper');
     var AxisProxy = require('./AxisProxy');
     var each = zrUtil.each;
-    var eachAxisDim = modelUtil.eachAxisDim;
+    var eachAxisDim = helper.eachAxisDim;
 
     var DataZoomModel = echarts.extendComponentModel({
 
         type: 'dataZoom',
 
         dependencies: [
-            'xAxis', 'yAxis', 'zAxis', 'radiusAxis', 'angleAxis', 'series'
+            'xAxis', 'yAxis', 'zAxis', 'radiusAxis', 'angleAxis', 'singleAxis', 'series'
         ],
 
         /**
@@ -28,14 +29,19 @@ define(function(require) {
             orient: null,           // Default auto by axisIndex. Possible value: 'horizontal', 'vertical'.
             xAxisIndex: null,       // Default the first horizontal category axis.
             yAxisIndex: null,       // Default the first vertical category axis.
-            angleAxisIndex: null,
-            radiusAxisIndex: null,
-            filterMode: 'filter',   // Possible values: 'filter' or 'empty'.
-                                    // 'filter': data items which are out of window will be removed.
-                                    //           This option is applicable when filtering outliers.
+
+            filterMode: 'filter',   // Possible values: 'filter' or 'empty' or 'weakFilter'.
+                                    // 'filter': data items which are out of window will be removed. This option is
+                                    //          applicable when filtering outliers. For each data item, it will be
+                                    //          filtered if one of the relevant dimensions is out of the window.
+                                    // 'weakFilter': data items which are out of window will be removed. This option
+                                    //          is applicable when filtering outliers. For each data item, it will be
+                                    //          filtered only if all  of the relevant dimensions are out of the same
+                                    //          side of the window.
                                     // 'empty': data items which are out of window will be set to empty.
                                     //          This option is applicable when user should not neglect
                                     //          that there are some data items out of window.
+                                    // 'none': Do not filter.
                                     // Taking line chart as an example, line will be broken in
                                     // the filtered points when filterModel is set to 'empty', but
                                     // be connected when set to 'filter'.
@@ -47,7 +53,11 @@ define(function(require) {
             start: 0,               // Start percent. 0 ~ 100
             end: 100,               // End percent. 0 ~ 100
             startValue: null,       // Start value. If startValue specified, start is ignored.
-            endValue: null          // End value. If endValue specified, end is ignored.
+            endValue: null,         // End value. If endValue specified, end is ignored.
+            minSpan: null,          // 0 ~ 100
+            maxSpan: null,          // 0 ~ 100
+            minValueSpan: null,     // The range of dataZoom can not be smaller than that.
+            maxValueSpan: null      // The range of dataZoom can not be larger than that.
         },
 
         /**
@@ -83,6 +93,12 @@ define(function(require) {
              */
             this._autoThrottle = true;
 
+            /**
+             * 'percent' or 'value'
+             * @private
+             */
+            this._rangePropMode = ['percent', 'percent'];
+
             var rawOption = retrieveRaw(option);
 
             this.mergeDefaultAndTheme(option, ecModel);
@@ -115,8 +131,17 @@ define(function(require) {
 
             this._setDefaultThrottle(rawOption);
 
-            processRangeProp('start', 'startValue', rawOption, thisOption);
-            processRangeProp('end', 'endValue', rawOption, thisOption);
+            updateRangeUse(this, rawOption);
+
+            each([['start', 'startValue'], ['end', 'endValue']], function (names, index) {
+                // start/end has higher priority over startValue/endValue if they
+                // both set, but we should make chart.setOption({endValue: 1000})
+                // effective, rather than chart.setOption({endValue: 1000, end: null}).
+                if (this._rangePropMode[index] === 'value') {
+                    thisOption[names[0]] = null;
+                }
+                // Otherwise do nothing and use the merge result.
+            }, this);
 
             this.textStyleModel = this.getModel('textStyle');
 
@@ -210,16 +235,23 @@ define(function(require) {
             var autoAxisIndex = true;
             var orient = this.get('orient', true);
             var thisOption = this.option;
+            var dependentModels = this.dependentModels;
 
             if (autoAxisIndex) {
                 // Find axis that parallel to dataZoom as default.
-                var dimNames = orient === 'vertical'
-                    ? {dim: 'y', axisIndex: 'yAxisIndex', axis: 'yAxis'}
-                    : {dim: 'x', axisIndex: 'xAxisIndex', axis: 'xAxis'};
+                var dimName = orient === 'vertical' ? 'y' : 'x';
 
-                if (this.dependentModels[dimNames.axis].length) {
-                    thisOption[dimNames.axisIndex] = [0];
+                if (dependentModels[dimName + 'Axis'].length) {
+                    thisOption[dimName + 'AxisIndex'] = [0];
                     autoAxisIndex = false;
+                }
+                else {
+                    each(dependentModels.singleAxis, function (singleAxisModel) {
+                        if (autoAxisIndex && singleAxisModel.get('orient', true) === orient) {
+                            thisOption.singleAxisIndex = [singleAxisModel.componentIndex];
+                            autoAxisIndex = false;
+                        }
+                    });
                 }
             }
 
@@ -257,7 +289,29 @@ define(function(require) {
                     if (this._isSeriesHasAllAxesTypeOf(seriesModel, 'value')) {
                         eachAxisDim(function (dimNames) {
                             var axisIndices = thisOption[dimNames.axisIndex];
+
                             var axisIndex = seriesModel.get(dimNames.axisIndex);
+                            var axisId = seriesModel.get(dimNames.axisId);
+
+                            var axisModel = seriesModel.ecModel.queryComponents({
+                                mainType: dimNames.axis,
+                                index: axisIndex,
+                                id: axisId
+                            })[0];
+
+                            if (__DEV__) {
+                                if (!axisModel) {
+                                    throw new Error(
+                                        dimNames.axis + ' "' + zrUtil.retrieve(
+                                            axisIndex,
+                                            axisId,
+                                            0
+                                        ) + '" not found'
+                                    );
+                                }
+                            }
+                            axisIndex = axisModel.componentIndex;
+
                             if (zrUtil.indexOf(axisIndices, axisIndex) < 0) {
                                 axisIndices.push(axisIndex);
                             }
@@ -351,8 +405,23 @@ define(function(require) {
             }, this);
         },
 
+        /**
+         * @param {string} dimName
+         * @param {number} axisIndex
+         * @return {module:echarts/component/dataZoom/AxisProxy} If not found, return null/undefined.
+         */
         getAxisProxy: function (dimName, axisIndex) {
             return this._axisProxies[dimName + '_' + axisIndex];
+        },
+
+        /**
+         * @param {string} dimName
+         * @param {number} axisIndex
+         * @return {module:echarts/model/Model} If not found, return null/undefined.
+         */
+        getAxisModel: function (dimName, axisIndex) {
+            var axisProxy = this.getAxisProxy(dimName, axisIndex);
+            return axisProxy && axisProxy.getAxisModel();
         },
 
         /**
@@ -364,14 +433,17 @@ define(function(require) {
          * @param {number} [opt.end]
          * @param {number} [opt.startValue]
          * @param {number} [opt.endValue]
+         * @param {boolean} [ignoreUpdateRangeUsg=false]
          */
-        setRawRange: function (opt) {
+        setRawRange: function (opt, ignoreUpdateRangeUsg) {
             each(['start', 'end', 'startValue', 'endValue'], function (name) {
                 // If any of those prop is null/undefined, we should alos set
                 // them, because only one pair between start/end and
                 // startValue/endValue can work.
                 this.option[name] = opt[name];
             }, this);
+
+            !ignoreUpdateRangeUsg && updateRangeUse(this, opt);
         },
 
         /**
@@ -391,7 +463,7 @@ define(function(require) {
          *
          * @param {string} [axisDimName]
          * @param {number} [axisIndex]
-         * @return {Array.<number>} [startValue, endValue]
+         * @return {Array.<number>} [startValue, endValue] value can only be '-' or finite number.
          */
         getValueRange: function (axisDimName, axisIndex) {
             if (axisDimName == null && axisIndex == null) {
@@ -407,9 +479,15 @@ define(function(require) {
 
         /**
          * @public
+         * @param {module:echarts/model/Model} [axisModel] If axisModel given, find axisProxy
+         *      corresponding to the axisModel
          * @return {module:echarts/component/dataZoom/AxisProxy}
          */
-        findRepresentativeAxisProxy: function () {
+        findRepresentativeAxisProxy: function (axisModel) {
+            if (axisModel) {
+                return axisModel.__dzAxisProxy;
+            }
+
             // Find the first hosted axisProxy
             var axisProxies = this._axisProxies;
             for (var key in axisProxies) {
@@ -428,8 +506,14 @@ define(function(require) {
                     return axisProxies[key];
                 }
             }
-        }
+        },
 
+        /**
+         * @return {Array.<string>}
+         */
+        getRangePropMode: function () {
+            return this._rangePropMode.slice();
+        }
     });
 
     function retrieveRaw(option) {
@@ -443,14 +527,17 @@ define(function(require) {
         return ret;
     }
 
-    function processRangeProp(percentProp, valueProp, rawOption, thisOption) {
-        // start/end has higher priority over startValue/endValue,
-        // but we should make chart.setOption({endValue: 1000}) effective,
-        // rather than chart.setOption({endValue: 1000, end: null}).
-        if (rawOption[valueProp] != null && rawOption[percentProp] == null) {
-            thisOption[percentProp] = null;
-        }
-        // Otherwise do nothing and use the merge result.
+    function updateRangeUse(dataZoomModel, rawOption) {
+        each([['start', 'startValue'], ['end', 'endValue']], function (names, index) {
+            var rangePropMode = dataZoomModel._rangePropMode;
+            if (rawOption[names[0]] != null) {
+                rangePropMode[index] = 'percent';
+            }
+            else if (rawOption[names[1]] != null) {
+                rangePropMode[index] = 'value';
+            }
+            // else remain its original setting.
+        });
     }
 
     return DataZoomModel;
